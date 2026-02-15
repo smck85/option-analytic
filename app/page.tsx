@@ -38,7 +38,7 @@ export default function OptionCalculator() {
   const calculateTimeToExpiry = () => {
     const valDate = new Date(inputs.valuationDate);
     const exDate = new Date(inputs.exerciseDate);
-    const diffTime = exDate - valDate;
+    const diffTime = exDate.getTime() - valDate.getTime();
     const diffDays = diffTime / (1000 * 60 * 60 * 24);
     return Math.max(diffDays / 365.25, 0.001);
   };
