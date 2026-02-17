@@ -3,6 +3,34 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
+interface OptionResults {
+  price: number;
+  delta: number;
+  gamma: number;
+  vega: number;
+  theta: number;
+}
+
+interface Results {
+  call: OptionResults;
+  put: OptionResults;
+  timeToExpiry: number;
+}
+
+interface ChartDataPoint {
+  spot: string;
+  callPayoff: number;
+  putPayoff: number;
+  callCurrent: number;
+  putCurrent: number;
+  callIntrinsic: number;
+  putIntrinsic: number;
+  callDelta: number;
+  putDelta: number;
+  gamma: number;
+  vega: number;
+}
+
 export default function OptionCalculator() {
   const today = new Date().toISOString().split('T')[0];
   const oneYearFromNow = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0];
@@ -17,25 +45,25 @@ export default function OptionCalculator() {
     dividendYield: 0
   });
 
-  const [results, setResults] = useState(null);
-  const [optionType, setOptionType] = useState('call');
-  const [position, setPosition] = useState('long'); // 'long' or 'short'
-  const [chartData, setChartData] = useState([]);
-  const [mode, setMode] = useState('price'); // 'price' or 'iv'
-  const [marketPrice, setMarketPrice] = useState('');
+  const [results, setResults] = useState<Results | null>(null);
+  const [optionType, setOptionType] = useState<'call' | 'put'>('call');
+  const [position, setPosition] = useState<'long' | 'short'>('long');
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [mode, setMode] = useState<'price' | 'iv'>('price');
+  const [marketPrice, setMarketPrice] = useState<string>('');
 
-  const normalCDF = (x: number) => {
+  const normalCDF = (x: number): number => {
     const t = 1 / (1 + 0.2316419 * Math.abs(x));
     const d = 0.3989423 * Math.exp(-x * x / 2);
     const prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
     return x > 0 ? 1 - prob : prob;
   };
 
-  const normalPDF = (x: number) => {
+  const normalPDF = (x: number): number => {
     return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
   };
 
-  const calculateTimeToExpiry = () => {
+  const calculateTimeToExpiry = (): number => {
     const valDate = new Date(inputs.valuationDate);
     const exDate = new Date(inputs.exerciseDate);
     const diffTime = exDate.getTime() - valDate.getTime();
@@ -43,7 +71,7 @@ export default function OptionCalculator() {
     return Math.max(diffDays / 365.25, 0.001);
   };
 
-  const calculateBlackScholes = () => {
+  const calculateBlackScholes = (): { callPrice: number; putPrice: number } | null => {
     const S = inputs.spotPrice;
     const K = inputs.strikePrice;
     const T = calculateTimeToExpiry();
@@ -92,14 +120,15 @@ export default function OptionCalculator() {
     });
 
     generateChartData(S, K, T, sigma, r, q, callPrice, putPrice);
+    
+    return { callPrice, putPrice };
   };
 
-  const generateChartData = (S, K, T, sigma, r, q, callPrice, putPrice) => {
-    const data = [];
+  const generateChartData = (S: number, K: number, T: number, sigma: number, r: number, q: number, callPrice: number, putPrice: number): void => {
+    const data: ChartDataPoint[] = [];
     const range = S * 0.5;
     const step = range / 100;
     
-    // Position multiplier: long = 1, short = -1
     const posMultiplier = position === 'long' ? 1 : -1;
     
     for (let spot = Math.max(1, S - range); spot <= S + range; spot += step) {
@@ -109,19 +138,15 @@ export default function OptionCalculator() {
       const callCurrentValue = spot * Math.exp(-q * T) * normalCDF(d1_spot) - K * Math.exp(-r * T) * normalCDF(d2_spot);
       const putCurrentValue = K * Math.exp(-r * T) * normalCDF(-d2_spot) - spot * Math.exp(-q * T) * normalCDF(-d1_spot);
       
-      // Intrinsic value (no premium)
       const callIntrinsic = Math.max(0, spot - K);
       const putIntrinsic = Math.max(0, K - spot);
       
-      // Payoff at expiry (intrinsic - premium paid/received)
       const callPayoff = (callIntrinsic - callPrice) * posMultiplier;
       const putPayoff = (putIntrinsic - putPrice) * posMultiplier;
       
-      // Current P&L (current value - premium paid/received)
       const callCurrentPnL = (callCurrentValue - callPrice) * posMultiplier;
       const putCurrentPnL = (putCurrentValue - putPrice) * posMultiplier;
       
-      // Greeks (always from long perspective, will adjust in display if needed)
       const delta_call = Math.exp(-q * T) * normalCDF(d1_spot);
       const delta_put = -Math.exp(-q * T) * normalCDF(-d1_spot);
       const gamma = Math.exp(-q * T) * normalPDF(d1_spot) / (spot * sigma * Math.sqrt(T));
@@ -129,16 +154,12 @@ export default function OptionCalculator() {
       
       data.push({
         spot: spot.toFixed(2),
-        // Payoff with premium factored in
         callPayoff: callPayoff,
         putPayoff: putPayoff,
-        // Current P&L with premium
         callCurrent: callCurrentPnL,
         putCurrent: putCurrentPnL,
-        // Intrinsic value (no premium) - adjusted for position
         callIntrinsic: callIntrinsic * posMultiplier,
         putIntrinsic: putIntrinsic * posMultiplier,
-        // Greeks
         callDelta: delta_call,
         putDelta: delta_put,
         gamma: gamma,
@@ -149,7 +170,7 @@ export default function OptionCalculator() {
     setChartData(data);
   };
 
-  const calculateImpliedVolatility = () => {
+  const calculateImpliedVolatility = (): void => {
     const targetPrice = parseFloat(marketPrice);
     if (isNaN(targetPrice) || targetPrice <= 0) {
       alert('Please enter a valid option price');
@@ -167,7 +188,6 @@ export default function OptionCalculator() {
       return;
     }
 
-    // Check intrinsic value
     const intrinsicValue = optionType === 'call' 
       ? Math.max(0, S * Math.exp(-q * T) - K * Math.exp(-r * T))
       : Math.max(0, K * Math.exp(-r * T) - S * Math.exp(-q * T));
@@ -177,8 +197,7 @@ export default function OptionCalculator() {
       return;
     }
 
-    // Newton-Raphson iteration
-    let sigma = 0.3; // Initial guess: 30%
+    let sigma = 0.3;
     const maxIterations = 100;
     const tolerance = 0.0001;
 
@@ -194,11 +213,9 @@ export default function OptionCalculator() {
       const diff = price - targetPrice;
 
       if (Math.abs(diff) < tolerance) {
-        // Found it! Update volatility and recalculate everything
         const impliedVol = sigma * 100;
         setInputs(prev => ({ ...prev, volatility: impliedVol }));
         
-        // Now recalculate all Greeks with the new IV
         const d1_final = d1;
         const d2_final = d2;
         
@@ -256,7 +273,7 @@ export default function OptionCalculator() {
     }
   }, [inputs, optionType, mode, position]);
 
-  const handleInputChange = (field, value) => {
+  const handleInputChange = (field: string, value: number | string): void => {
     setInputs(prev => ({ ...prev, [field]: value }));
   };
 
@@ -333,7 +350,6 @@ export default function OptionCalculator() {
           gap: 2rem;
         }
         
-        /* Responsive breakpoints */
         @media (max-width: 1200px) {
           .main-grid {
             grid-template-columns: 320px 1fr;
@@ -363,7 +379,6 @@ export default function OptionCalculator() {
       `}</style>
 
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-        {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <h1 style={{ 
             fontSize: 'clamp(2rem, 5vw, 3.5rem)', 
@@ -385,7 +400,6 @@ export default function OptionCalculator() {
           </p>
         </div>
 
-        {/* Option Type Toggle */}
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
           <button 
             className={`btn btn-primary ${optionType === 'call' ? 'active' : ''}`}
@@ -401,7 +415,6 @@ export default function OptionCalculator() {
           </button>
         </div>
 
-        {/* Position Toggle */}
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
           <button 
             className={`btn btn-primary ${position === 'long' ? 'active' : ''}`}
@@ -419,7 +432,6 @@ export default function OptionCalculator() {
           </button>
         </div>
 
-        {/* Mode Toggle */}
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
           <button 
             className={`btn btn-primary ${mode === 'price' ? 'active' : ''}`}
@@ -438,7 +450,6 @@ export default function OptionCalculator() {
         </div>
 
         <div className="main-grid">
-          {/* Inputs */}
           <div>
             <div className="card">
               <h3 style={{ fontSize: '1.1rem', marginBottom: '1.5rem', color: '#00d4ff' }}>
@@ -537,12 +548,12 @@ export default function OptionCalculator() {
                       transition: 'all 0.3s ease'
                     }}
                     onMouseEnter={(e) => {
-                      e.target.style.transform = 'scale(1.02)';
-                      e.target.style.boxShadow = '0 6px 20px rgba(0, 255, 136, 0.5)';
+                      e.currentTarget.style.transform = 'scale(1.02)';
+                      e.currentTarget.style.boxShadow = '0 6px 20px rgba(0, 255, 136, 0.5)';
                     }}
                     onMouseLeave={(e) => {
-                      e.target.style.transform = 'scale(1)';
-                      e.target.style.boxShadow = 'none';
+                      e.currentTarget.style.transform = 'scale(1)';
+                      e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
                     CALCULATE IV →
@@ -590,7 +601,6 @@ export default function OptionCalculator() {
               </div>
             </div>
 
-            {/* Results */}
             {currentResults && (
               <div className="card" style={{ marginTop: '1.5rem' }}>
                 <h3 style={{ fontSize: '1.1rem', marginBottom: '1.5rem', color: '#00d4ff' }}>
@@ -612,8 +622,8 @@ export default function OptionCalculator() {
                     gridTemplateColumns: '1fr 1fr',
                     gap: '0.5rem'
                   }}>
-                    <div>Time: {results.timeToExpiry.toFixed(2)} years</div>
-                    <div>Days: {Math.round(results.timeToExpiry * 365.25)}</div>
+                    <div>Time: {results?.timeToExpiry.toFixed(2)} years</div>
+                    <div>Days: {Math.round((results?.timeToExpiry || 0) * 365.25)}</div>
                   </div>
                 </div>
 
@@ -663,9 +673,7 @@ export default function OptionCalculator() {
             )}
           </div>
 
-          {/* Charts */}
           <div>
-            {/* Payoff */}
             <div className="card" style={{ marginBottom: '1.5rem' }}>
               <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: '#00d4ff' }}>
                 PAYOFF DIAGRAM
@@ -684,7 +692,7 @@ export default function OptionCalculator() {
                       border: '1px solid #00d4ff', 
                       fontSize: '0.75rem' 
                     }} 
-                    formatter={(value) => typeof value === 'number' ? value.toFixed(2) : value}
+                    formatter={(value: any) => typeof value === 'number' ? value.toFixed(2) : value}
                   />
                   <Legend wrapperStyle={{ fontSize: '0.7rem' }} />
                   <Line 
@@ -725,9 +733,7 @@ export default function OptionCalculator() {
               </ResponsiveContainer>
             </div>
 
-            {/* Greeks */}
             <div className="charts-grid" style={{ marginTop: '1.5rem', gridTemplateColumns: 'repeat(3, 1fr)' }}>
-              {/* Delta */}
               <div className="card">
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.8rem', color: '#00d4ff' }}>DELTA</h4>
                 <ResponsiveContainer width="100%" height={200}>
@@ -741,7 +747,6 @@ export default function OptionCalculator() {
                 </ResponsiveContainer>
               </div>
 
-              {/* Gamma */}
               <div className="card">
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.8rem', color: '#00d4ff' }}>GAMMA</h4>
                 <ResponsiveContainer width="100%" height={200}>
@@ -755,7 +760,6 @@ export default function OptionCalculator() {
                 </ResponsiveContainer>
               </div>
 
-              {/* Vega */}
               <div className="card">
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.8rem', color: '#00d4ff' }}>VEGA</h4>
                 <ResponsiveContainer width="100%" height={200}>
@@ -772,7 +776,6 @@ export default function OptionCalculator() {
           </div>
         </div>
 
-        {/* Footer */}
         <div style={{ 
           textAlign: 'center', 
           marginTop: '4rem', 
